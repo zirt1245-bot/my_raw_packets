@@ -1,0 +1,8 @@
+[package]
+name = "my_raw_packets"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ctrlc = "3.5.2"
+libc = "0.2.183"
