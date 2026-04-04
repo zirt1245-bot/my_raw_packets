@@ -10,6 +10,7 @@ A lightweight network packet sniffer written in Rust. Captures raw Ethernet fram
 - **IPv4 decoding** — resolves source/destination IP addresses and detects the transport protocol
 - **Transport layer detection** — identifies TCP, UDP, ICMP, IGMP, and other IP protocols
 - **Port extraction** — shows source/destination ports for TCP and UDP packets
+- **Filtering** — filter captured traffic by protocol, port, or IP address
 - **Graceful shutdown** — catches `Ctrl+C` and closes the socket cleanly
 
 ## How it works
@@ -40,24 +41,62 @@ The program opens a raw `AF_PACKET / SOCK_RAW` socket, enables promiscuous mode 
 [dependencies]
 libc  = "0.2"
 ctrlc = "3"
+clap  = { version = "4", features = ["derive"] }
 ```
 
-## Configuration
+## Build
+
+```bash
+cargo build --release
+```
+
+## Usage
+
+```
+sudo ./target/release/raw-sniffer <INTERFACE> [OPTIONS]
+```
+
+### Arguments
+
+| Argument | Description |
+|---|---|
+| `<INTERFACE>` | Network interface to listen on (e.g. `eth0`, `wlp0s20f3`) |
+
+### Options
+
+| Option | Description |
+|---|---|
+| `--proto <PROTO>` | Filter by protocol: `tcp`, `udp`, `icmp` |
+| `--port <PORT>` | Filter by port number |
+| `--ip <IP>` | Filter by IP address |
+| `-h, --help` | Print help |
+
+### Examples
+
+```bash
+# Capture all traffic
+sudo ./target/release/raw-sniffer eth0
+
+# Only TCP
+sudo ./target/release/raw-sniffer eth0 --proto tcp
+
+# Only port 443 (HTTPS)
+sudo ./target/release/raw-sniffer eth0 --port 443
+
+# Only DNS (UDP port 53)
+sudo ./target/release/raw-sniffer eth0 --proto udp --port 53
+
+# Only traffic to/from a specific IP
+sudo ./target/release/raw-sniffer eth0 --ip 192.168.1.1
+
+# Combine filters
+sudo ./target/release/raw-sniffer eth0 --proto tcp --port 443 --ip 192.168.1.1
+```
 
 You can list available interfaces with:
 
 ```bash
 ip link show
-```
-
-## Build & run
-
-```bash
-cargo build --release
-sudo ./target/release/raw-sniffer <network interface>
-
-# Example:
-sudo ./target/release/raw-sniffer eth0
 ```
 
 ## Example output
@@ -75,18 +114,18 @@ Each line represents one captured frame:
 
 ## Stop
 
-Press `Ctrl+C`. The program prints `Completing work...` and exits, closing the socket cleanly.
+Press `Ctrl+C`. The program prints `Shutting down...` and exits, closing the socket cleanly.
 
 ## Project structure
 
 ```
 src/
-├── main.rs               # Socket setup, receive loop, Ethernet/IPv4 parsing
+├── main.rs               # Socket setup, receive loop, Ethernet/IPv4 parsing, filters
 └── promiscuous_mode.rs   # setsockopt wrapper for PACKET_MR_PROMISC
 ```
 
 ## Limitations
 
 - IPv6 frames are detected but not decoded
-- No BPF filtering — captures all traffic on the interface
+- No BPF filtering — all packets are captured at the kernel level, filtering is done in userspace
 - Linux only; does not work on macOS or Windows

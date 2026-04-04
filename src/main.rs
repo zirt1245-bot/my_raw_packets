@@ -1,48 +1,54 @@
+use clap::Parser;
 use libc::{AF_PACKET, ETH_P_ALL, SOCK_RAW, if_nametoindex, recvfrom, socket};
 use promiscuous_mode::enable_promiscuous;
 use std::{
+    ffi::CString,
     io::Error,
     sync::Arc,
     sync::atomic::{AtomicBool, Ordering},
-    ffi::CString,
 };
-use clap::Parser;
 
 #[derive(Parser)] // будем урпавлять прогрраммой командами из терминала
 #[command(name = "raw-sniffer", about = "Raw packet sniffer")]
 struct Cli {
     /// Network interface to listen on (e.g. eth0, wlp0s20f3)
     interface: String, // сетевой интефейс
-    
+
     /// Filter by protocol: tcp, udp, icmp
     #[arg(long)]
     proto: Option<String>, // фильтр протокола
-    
+
     /// Filter by port number
     #[arg(long)]
     port: Option<u16>, // фильтр порта
-    
+
     /// Filter by IP address
     #[arg(long)]
-    ip: Option<String>
+    ip: Option<String>, // фильтр ip
 }
 
 mod promiscuous_mode;
 
 fn format_mac(mac: &[u8]) -> String {
+    // крассивый вывод MAC адресса
     mac.iter()
         .map(|b| format!("{:02x}", b))
         .collect::<Vec<_>>()
         .join(":")
 }
 
-fn parse_ethernet(buf: &[u8], proto_filter: &Option<String>, port_filter: &Option<u16>, ip_filter: &Option<String>) {
+fn parse_ethernet(
+    buf: &[u8],
+    proto_filter: &Option<String>,
+    port_filter: &Option<u16>,
+    ip_filter: &Option<String>,
+) {
     if buf.len() < 14 {
         println!("Invalid Ethernet");
     } else {
         let mac_dst = &buf[0..=5]; // собираем MAC получателя
         let mac_src = &buf[6..=11]; // собираем MAC отпавителя
-        // MAC это адрес нашей физического интерфейса
+        // MAC это адрес нашего физического интерфейса
 
         let str_dst_src = format!(
             "DST: {} -> SRC: {}",
@@ -65,43 +71,43 @@ fn parse_ethernet(buf: &[u8], proto_filter: &Option<String>, port_filter: &Optio
                     2 => String::from("IGMP"),
                     _ => String::from("Other IP protocol"),
                 };
-                
+
                 if let Some(filter) = proto_filter {
                     if filter.to_uppercase() != proto_name {
                         return;
                     }
                 }
-                
+
                 let ipv4_info = parse_ipv4(ip_header);
-                
+
                 if let Some(port) = port_filter {
                     if !ipv4_info.contains(&format!(":{}", port)) {
                         return;
                     }
                 }
-                
+
                 if let Some(ip) = ip_filter {
                     if !ipv4_info.contains(ip.as_str()) {
                         return;
                     }
                 }
 
-                format!("{} | {}", parse_ipv4(ip_header), proto_name)
+                format!("{} | {}", ipv4_info, proto_name)
             }
             0x86DD => {
                 if proto_filter.is_some() {
                     return;
                 }
-                
+
                 String::from("IPv6")
-            },
+            }
             0x0806 => {
                 if proto_filter.is_some() {
                     return;
                 }
-                
+
                 String::from("ARP")
-            }, // ищет MAC какого-то IP
+            } // ищет MAC какого-то IP
             _ => String::from("Неизвестный EtherType"),
             // базовые вложенные протоколы
         };
@@ -144,12 +150,12 @@ fn parse_ipv4(buf: &[u8]) -> String {
 fn main() {
     let cli = Cli::parse();
     let iface_cstr = CString::new(cli.interface).expect("Invalid interface name");
-    
+
     let running = Arc::new(AtomicBool::new(true)); // flag
 
     let protocol = (ETH_P_ALL as u16).to_be() as i32;
     let fd = unsafe { socket(AF_PACKET, SOCK_RAW, protocol) };
-    
+
     if fd < 0 {
         panic!("\nОШИБКА СОКЕТА: {}", Error::last_os_error());
     }
