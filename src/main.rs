@@ -4,9 +4,24 @@ use std::{
     io::Error,
     sync::Arc,
     sync::atomic::{AtomicBool, Ordering},
-    env::args,
     ffi::CString,
 };
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(name = "raw-sniffer", about = "Raw packet sniffer")]
+struct Cli {
+    /// Network interface to listen on (e.g. eth0, wlp0s20f3)
+    interface: String,
+    
+    /// Filter by protocol: tcp, udp, icmp
+    #[arg(long)]
+    proto: Option<String>,
+    
+    /// Filter by port number
+    #[arg(long)]
+    port: Option<u16>,
+}
 
 mod promiscuous_mode;
 
@@ -17,7 +32,7 @@ fn format_mac(mac: &[u8]) -> String {
         .join(":")
 }
 
-fn parse_ethernet(buf: &[u8]) {
+fn parse_ethernet(buf: &[u8], proto_filter: &Option<String>, port_filter: &Option<u16>) {
     if buf.len() < 14 {
         println!("Invalid Ethernet");
     } else {
@@ -46,11 +61,36 @@ fn parse_ethernet(buf: &[u8]) {
                     2 => String::from("IGMP"),
                     _ => String::from("Other IP protocol"),
                 };
+                
+                if let Some(filter) = proto_filter {
+                    if filter.to_uppercase() != proto_name {
+                        return;
+                    }
+                }
+                
+                if let Some(port) = port_filter {
+                    let ipv4_info = parse_ipv4(ip_header);
+                    if !ipv4_info.contains(&format!(":{}", port)) {
+                        return;
+                    }
+                }
 
                 format!("{} | {}", parse_ipv4(ip_header), proto_name)
             }
-            0x86DD => String::from("IPv6"),
-            0x0806 => String::from("ARP"), // ищет MAC какого-то IP
+            0x86DD => {
+                if proto_filter.is_some() {
+                    return;
+                }
+                
+                String::from("IPv6")
+            },
+            0x0806 => {
+                if proto_filter.is_some() {
+                    return;
+                }
+                
+                String::from("ARP")
+            }, // ищет MAC какого-то IP
             _ => String::from("Неизвестный EtherType"),
             // базовые вложенные протоколы
         };
@@ -91,11 +131,8 @@ fn parse_ipv4(buf: &[u8]) -> String {
 }
 
 fn main() {
-    let iface = args()
-        .nth(1)
-        .expect("Использование: sudo ./raw-sniffer <интерфейс>");
-    
-    let iface_cstr = CString::new(iface).expect("Невалидное имя интерфейса");
+    let cli = Cli::parse();
+    let iface_cstr = CString::new(cli.interface).expect("Invalid interface name");
     
     let running = Arc::new(AtomicBool::new(true)); // flag
 
@@ -142,7 +179,7 @@ fn main() {
 
         let n = n as usize;
 
-        parse_ethernet(&buf[0..n]);
+        parse_ethernet(&buf[0..n], &cli.proto, &cli.port);
 
         if !running.load(Ordering::SeqCst) {
             println!("Завершение работы...");
