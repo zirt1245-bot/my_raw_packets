@@ -8,19 +8,23 @@ use std::{
 };
 use clap::Parser;
 
-#[derive(Parser)]
+#[derive(Parser)] // будем урпавлять прогрраммой командами из терминала
 #[command(name = "raw-sniffer", about = "Raw packet sniffer")]
 struct Cli {
     /// Network interface to listen on (e.g. eth0, wlp0s20f3)
-    interface: String,
+    interface: String, // сетевой интефейс
     
     /// Filter by protocol: tcp, udp, icmp
     #[arg(long)]
-    proto: Option<String>,
+    proto: Option<String>, // фильтр протокола
     
     /// Filter by port number
     #[arg(long)]
-    port: Option<u16>,
+    port: Option<u16>, // фильтр порта
+    
+    /// Filter by IP address
+    #[arg(long)]
+    ip: Option<String>
 }
 
 mod promiscuous_mode;
@@ -32,7 +36,7 @@ fn format_mac(mac: &[u8]) -> String {
         .join(":")
 }
 
-fn parse_ethernet(buf: &[u8], proto_filter: &Option<String>, port_filter: &Option<u16>) {
+fn parse_ethernet(buf: &[u8], proto_filter: &Option<String>, port_filter: &Option<u16>, ip_filter: &Option<String>) {
     if buf.len() < 14 {
         println!("Invalid Ethernet");
     } else {
@@ -68,9 +72,16 @@ fn parse_ethernet(buf: &[u8], proto_filter: &Option<String>, port_filter: &Optio
                     }
                 }
                 
+                let ipv4_info = parse_ipv4(ip_header);
+                
                 if let Some(port) = port_filter {
-                    let ipv4_info = parse_ipv4(ip_header);
                     if !ipv4_info.contains(&format!(":{}", port)) {
+                        return;
+                    }
+                }
+                
+                if let Some(ip) = ip_filter {
+                    if !ipv4_info.contains(ip.as_str()) {
                         return;
                     }
                 }
@@ -179,7 +190,7 @@ fn main() {
 
         let n = n as usize;
 
-        parse_ethernet(&buf[0..n], &cli.proto, &cli.port);
+        parse_ethernet(&buf[0..n], &cli.proto, &cli.port, &cli.ip);
 
         if !running.load(Ordering::SeqCst) {
             println!("Завершение работы...");
