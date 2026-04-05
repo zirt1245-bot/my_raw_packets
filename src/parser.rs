@@ -71,11 +71,9 @@ pub fn parse_ethernet(
                     _ => "OTHER",
                 };
 
-                if proto_filter.iter().any(|filter| {
+                if !proto_filter.is_empty() && !proto_filter.iter().any(|filter| {
+                    proto_name_plain.to_uppercase().starts_with(&filter.to_uppercase())
                     // фильтр протокола
-                    !proto_name_plain
-                        .to_uppercase()
-                        .starts_with(&filter.to_uppercase())
                 }) {
                     return;
                 }
@@ -84,15 +82,6 @@ pub fn parse_ethernet(
                     proto_name_plain
                         .to_uppercase()
                         .starts_with(&exc.to_uppercase())
-                }) {
-                    return;
-                }
-                
-                if ip_filter.iter().any(|ip| {
-                    // фильтр IP
-                    !proto_name_plain
-                        .to_uppercase()
-                        .starts_with(&ip.to_uppercase())
                 }) {
                     return;
                 }
@@ -142,7 +131,13 @@ pub fn parse_ethernet(
                     // IGMP: сетевой шум
                 };
 
-                let (ipv4_info, src_port, dst_port) = parse_ipv4(ip_header);
+                let (ipv4_info, src_port, dst_port, src_ip, dst_ip) = parse_ipv4(ip_header);
+                
+                if !ip_filter.is_empty() { // фильтр ip
+                    if !ip_filter.iter().any(|ip| src_ip.contains(ip.as_str()) || dst_ip.contains(ip.as_str())) {
+                        return;
+                    }
+                }
 
                 if !port_filter.is_empty() {
                     // фильтр порта
@@ -156,8 +151,8 @@ pub fn parse_ethernet(
                 format!("{} | {}", ipv4_info, proto_name)
             }
             0x86DD => {
-                if proto_filter.iter().any(|filter| {
-                    !"IPv6"
+                if !proto_filter.iter().any(|filter| {
+                    "IPv6"
                         .to_uppercase()
                         .starts_with(&filter.to_uppercase())
                 }) {
@@ -175,15 +170,15 @@ pub fn parse_ethernet(
                 "IPv6".to_string()
             }
             0x0806 => {
-                if proto_filter.iter().any(|filter| {
-                    !"ARP"
+                if !proto_filter.iter().any(|filter| {
+                    "ARP"
                         .to_uppercase()
                         .starts_with(&filter.to_uppercase())
                 }) {
                     return;
                 }
                 
-                if proto_filter.iter().any(|filter| {
+                if exc_proto_filter.iter().any(|filter| {
                     "ARP"
                         .to_uppercase()
                         .starts_with(&filter.to_uppercase())
@@ -201,9 +196,9 @@ pub fn parse_ethernet(
     }
 }
 
-fn parse_ipv4(buf: &[u8]) -> (String, Option<u16>, Option<u16>) {
+fn parse_ipv4(buf: &[u8]) -> (String, Option<u16>, Option<u16>, String, String) {
     if buf.len() < 20 {
-        return (String::from("Invalid IPv4"), None, None);
+        return (String::from("Invalid IPv4"), None, None, "".to_string(), "".to_string());
     }
 
     let protocol = buf[9];
@@ -248,5 +243,8 @@ fn parse_ipv4(buf: &[u8]) -> (String, Option<u16>, Option<u16>) {
         ),
         src_port,
         dst_port,
+        src_ip,
+        dst_ip
+        // выводим строку и кортеж
     )
 }
