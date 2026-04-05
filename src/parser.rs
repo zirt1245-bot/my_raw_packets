@@ -36,6 +36,8 @@ pub fn parse_ethernet(
     port_filter: &Vec<u16>,
     ip_filter: &Vec<String>,
     exc_proto_filter: &Vec<String>,
+    exc_port_filter: &Vec<u16>,
+    exc_ip_filter: &Vec<String>
 ) {
     if buf.len() < 14 {
         println!("Invalid Ethernet");
@@ -138,6 +140,12 @@ pub fn parse_ethernet(
                         return;
                     }
                 }
+                
+                if !exc_ip_filter.is_empty() {
+                    if exc_ip_filter.iter().any(|ip| src_ip.contains(ip.as_str()) || dst_ip.contains(ip.as_str())) {
+                        return;
+                    }
+                }
 
                 if !port_filter.is_empty() {
                     // фильтр порта
@@ -147,14 +155,20 @@ pub fn parse_ethernet(
                         return
                     }
                 }
+                
+                if !exc_port_filter.is_empty() {
+                    if exc_port_filter.iter().any(|port| {
+                        src_port == Some(*port) || dst_port == Some(*port)
+                    }) {
+                        return
+                    }
+                }
 
                 format!("{} | {}", ipv4_info, proto_name)
             }
             0x86DD => {
-                if !proto_filter.iter().any(|filter| {
-                    "IPv6"
-                        .to_uppercase()
-                        .starts_with(&filter.to_uppercase())
+                if !proto_filter.is_empty() && !proto_filter.iter().any(|filter| {
+                    "IPv6".starts_with(&filter.to_uppercase())
                 }) {
                     return;
                 }
@@ -170,10 +184,8 @@ pub fn parse_ethernet(
                 "IPv6".to_string()
             }
             0x0806 => {
-                if !proto_filter.iter().any(|filter| {
-                    "ARP"
-                        .to_uppercase()
-                        .starts_with(&filter.to_uppercase())
+                if !proto_filter.is_empty() && !proto_filter.iter().any(|filter| {
+                    "ARP".starts_with(&filter.to_uppercase())
                 }) {
                     return;
                 }

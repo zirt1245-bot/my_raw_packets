@@ -31,6 +31,14 @@ struct Cli {
     /// Exclude by protocol: tcp, udp, icmp
     #[arg(long)]
     exc_proto: Vec<String>,
+    
+    /// Exclude by port number
+    #[arg(long)]
+    exc_port: Vec<u16>,
+    
+    /// Exclude by IP address
+    #[arg(long)]
+    exc_ip: Vec<String>,
 }
 use crate::parser::parse_ethernet;
 
@@ -83,7 +91,7 @@ fn main() {
 
         let n = n as usize;
 
-        parse_ethernet(&buf[0..n], &cli.proto, &cli.port, &cli.ip, &cli.exc_proto);
+        parse_ethernet(&buf[0..n], &cli.proto, &cli.port, &cli.ip, &cli.exc_proto, &cli.exc_port, &cli.exc_ip);
 
         if !running.load(Ordering::SeqCst) {
             println!("Завершение работы...");
