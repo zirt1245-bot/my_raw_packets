@@ -1,6 +1,6 @@
 use clap::Parser;
 use colored::Colorize;
-use libc::{AF_PACKET, ETH_P_ALL, SOCK_RAW, if_nametoindex, recvfrom, socket};
+use libc::{AF_PACKET, ETH_P_ALL,    SOCK_RAW, if_nametoindex, recvfrom, socket};
 use promiscuous_mode::enable_promiscuous;
 use std::{
     ffi::CString,
@@ -9,7 +9,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-#[derive(Parser)] // будем урпавлять прогрраммой командами из терминала
+#[derive(Parser)] // будем управлять программой командами из терминала
 #[command(name = "raw-sniffer", about = "Raw packet sniffer")]
 struct Cli {
     /// Network interface to listen on (e.g. eth0, wlp0s20f3)
@@ -26,9 +26,34 @@ struct Cli {
     /// Filter by IP address
     #[arg(long)]
     ip: Option<String>,
+    
+    /// Exclude by protocol: tcp, udp, icmp
+    #[arg(long)]
+    exc_proto: Option<String>
 }
 
 mod promiscuous_mode;
+
+fn known_org(ip: &str) -> &str { // name ip
+    if ip.starts_with("142.250.") || ip.starts_with("142.251.") || ip.starts_with("172.217.") {
+        "[Google]"
+    } else if ip.starts_with("192.168.") || ip.starts_with("10.") {
+        "[Your IP]"
+    } else if ip.starts_with("91.108.") || ip.starts_with("149.154.") {
+        "[Telegram]"
+    } else {
+        ""
+    }
+}
+
+fn colorize_ip(ip: &str) -> String {
+    // проверяем локальный адрес или нет
+    if ip.starts_with("192.168.") || ip.starts_with("10.") || ip.starts_with("172.") {
+        ip.green().to_string() // зеленный локальный
+    } else {
+        ip.red().to_string() // красный извне, то-есть интернет
+    }
+}
 
 fn format_mac(mac: &[u8]) -> String {
     // крассивый вывод MAC адресса
@@ -43,6 +68,7 @@ fn parse_ethernet(
     proto_filter: &Option<String>,
     port_filter: &Option<u16>,
     ip_filter: &Option<String>,
+    exc_proto_filter: &Option<String>
 ) {
     if buf.len() < 14 {
         println!("Invalid Ethernet");
@@ -85,36 +111,57 @@ fn parse_ethernet(
 
                         let mut flag_list = Vec::new();
 
-                        if syn { flag_list.push("SYN".green().to_string()); }
-                        if ack { flag_list.push("ACK".yellow().to_string()); }
-                        if fin { flag_list.push("FIN".red().to_string()); }
-                        if rst { flag_list.push("RST".red().to_string()); }
+                        if syn {
+                            flag_list.push("SYN".green().to_string());
+                        }
+                        if ack {
+                            flag_list.push("ACK".yellow().to_string());
+                        }
+                        if fin {
+                            flag_list.push("FIN".red().to_string());
+                        }
+                        if rst {
+                            flag_list.push("RST".red().to_string());
+                        }
                         /* SYN: первый пакет, хочу подключится
                         ACK: получил пакет, установка соединения
                         FIN: все пакеты отправили, закрытие соединения
-                        RST: ошибка покета */
-                        
+                        RST: ошибка пакета */
+
                         if flag_list.is_empty() {
                             format!("TCP: no flags")
                         } else {
                             format!("TCP: {}", flag_list.join(", "))
                         }
-                    },
+                    }
                     17 => "UDP".blue().to_string(),
                     1 => "ICMP".cyan().to_string(),
                     2 => "IGMP".purple().to_string(),
-                    _ => String::from("Other IP protocol"),
+                    _ => "Other IP protocol".black().to_string(),
+                    // IGMP: сетевой шум (надо будет добавить фильтр)
                 };
 
-                if let Some(filter) = proto_filter {
-                    if !proto_name.to_uppercase().starts_with(&filter.to_uppercase()) {
+                if let Some(filter) = proto_filter { // фильтр протокола
+                    if !proto_name
+                        .to_uppercase()
+                        .starts_with(&filter.to_uppercase())
+                    {
+                        return;
+                    }
+                }
+                
+                if let Some(exc_filter) = exc_proto_filter {
+                    if proto_name
+                        .to_uppercase()
+                        .starts_with(&exc_filter.to_uppercase())
+                    {
                         return;
                     }
                 }
 
                 let (ipv4_info, src_port, dst_port) = parse_ipv4(ip_header);
 
-                if let Some(port) = port_filter {
+                if let Some(port) = port_filter { // фильтр порта 
                     if src_port != Some(*port) && dst_port != Some(*port) {
                         return;
                     }
@@ -144,7 +191,7 @@ fn parse_ethernet(
             } // ищет MAC какого-то IP
             _ => String::from("Неизвестный EtherType"),
             // базовые вложенные протоколы
-        }; 
+        };
 
         println!("{} | {}", str_dst_src, ethertype_name);
     }
@@ -160,11 +207,18 @@ fn parse_ipv4(buf: &[u8]) -> (String, Option<u16>, Option<u16>) {
     let ihl = buf[0] & 0x0F;
     let ip_header_len = (ihl * 4) as usize;
 
-    let src = format!("{}.{}.{}.{}", buf[12], buf[13], buf[14], buf[15]);
-    let dst = format!("{}.{}.{}.{}", buf[16], buf[17], buf[18], buf[19]);
+    let src_ip = format!("{}.{}.{}.{}", buf[12], buf[13], buf[14], buf[15]);
+    let dst_ip = format!("{}.{}.{}.{}", buf[16], buf[17], buf[18], buf[19]);
 
+    let src_org = known_org(&src_ip);
+    let dst_org = known_org(&dst_ip);
+
+    let src = colorize_ip(&src_ip);
+    let dst = colorize_ip(&dst_ip);
+    
     let mut ports_src_str = String::new();
     let mut ports_dst_str = String::new();
+    
     let mut src_port: Option<u16> = None;
     let mut dst_port: Option<u16> = None;
 
@@ -184,7 +238,7 @@ fn parse_ipv4(buf: &[u8]) -> (String, Option<u16>, Option<u16>) {
     }
 
     (
-        format!("IPv4: {}{} -> {}{}", src, ports_src_str, dst, ports_dst_str),
+        format!("IPv4: {}{} {} -> {}{} {}", src, ports_src_str, src_org, dst, ports_dst_str, dst_org),
         src_port,
         dst_port,
     )
@@ -239,7 +293,7 @@ fn main() {
 
         let n = n as usize;
 
-        parse_ethernet(&buf[0..n], &cli.proto, &cli.port, &cli.ip);
+        parse_ethernet(&buf[0..n], &cli.proto, &cli.port, &cli.ip, &cli.exc_proto);
 
         if !running.load(Ordering::SeqCst) {
             println!("Завершение работы...");
