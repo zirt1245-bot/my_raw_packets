@@ -39,9 +39,6 @@ fn format_mac(mac: &[u8]) -> String {
         .join(":")
 }
 
-// fn matches_filter(...)
-// нужно допилить отдельную функцию под фильтры
-
 pub fn parse_ethernet(buf: &[u8], filters: &Filters) {
     if buf.len() < 14 {
         println!("Invalid Ethernet");
@@ -163,6 +160,7 @@ pub fn parse_ethernet(buf: &[u8], filters: &Filters) {
                     2 => "IGMP".purple().to_string(),
                     _ => "Other IP protocol".black().to_string(),
                     // IGMP: сетевой шум
+                    // ICMP: сообщения об ошибках и диагностика сети
                 };
 
                 let (ipv4_info, src_port, dst_port, src_ip, dst_ip) = parse_ipv4(ip_header);
@@ -208,6 +206,15 @@ pub fn parse_ethernet(buf: &[u8], filters: &Filters) {
                     {
                         return;
                     }
+
+                if !filters.exc_port.is_empty()
+                    && filters
+                        .exc_port
+                        .iter()
+                        .any(|port| src_port == Some(*port) || dst_port == Some(*port))
+                {
+                    return;
+                }
 
                 format!("{} | {}", ipv4_info, proto_name)
             }
