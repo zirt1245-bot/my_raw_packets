@@ -4,10 +4,12 @@ fn known_org(ip: &str) -> &str {
     // name ip
     if ip.starts_with("142.250.") || ip.starts_with("142.251.") || ip.starts_with("172.217.") {
         "[Google]"
-    } else if ip.starts_with("192.168.") || ip.starts_with("10.") {
-        "[Your IP]"
-    } else if ip.starts_with("91.108.") || ip.starts_with("149.154.") {
+    } else if ip.starts_with("192.168.") || ip.starts_with("10.") || ip.starts_with("172.16.") {
+        "[Local Network]"
+    } else if ip.starts_with("91.108.") || ip.starts_with("149.154.") || ip.starts_with("185.76.214.") {
         "[Telegram]"
+    } else if ip.starts_with("208.65.152") || ip.starts_with("208.117.224") || ip.starts_with("64.15.112.") {
+        "[YouTube]"
     } else {
         ""
     }
@@ -29,6 +31,9 @@ fn format_mac(mac: &[u8]) -> String {
         .collect::<Vec<_>>()
         .join(":")
 }
+
+// fn matches_filter(...)
+// нужно допилить отдельную функцию под фильтры
 
 pub fn parse_ethernet(
     buf: &[u8],
@@ -57,6 +62,10 @@ pub fn parse_ethernet(
 
         let ethertype_name = match ethertype {
             0x0800 => { // IPv4
+                if buf.len() < 14 + 20 {
+                    println!("Invalid IPv4");
+                }
+                
                 let ip_header = &buf[14..];
                 let proto_code = ip_header[9];
 
@@ -126,7 +135,22 @@ pub fn parse_ethernet(
                             format!("{} {}", "TCP:".blue(), flag_list.join(", "))
                         }
                     }
-                    17 => "UDP".blue().to_string(),
+                    17 => {
+                        let service = if transport.len() >= 4 {
+                            let dst_port = u16::from_be_bytes([transport[2], transport[3]]);
+                            match dst_port {
+                                53 => " [DNS]",
+                                123 => " [NTP]",
+                                67 => " [DHCP]",
+                                68 => " [DHCP]",
+                                5353 => " [mDNS]",
+                                _ => " no",
+                            }
+                        } else {
+                            ""
+                        };
+                        format!("{}:{}", "UDP".blue(), service)
+                    },
                     1 => "ICMP".cyan().to_string(),
                     2 => "IGMP".purple().to_string(),
                     _ => "Other IP protocol".black().to_string(),
