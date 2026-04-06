@@ -1,5 +1,7 @@
+mod filters;
 mod parser;
 use clap::Parser;
+use filters::Filters;
 use libc::{AF_PACKET, ETH_P_ALL, SOCK_RAW, if_nametoindex, recvfrom, socket};
 use std::{
     ffi::CString,
@@ -31,14 +33,18 @@ struct Cli {
     /// Exclude by protocol: tcp, udp, icmp
     #[arg(long)]
     exc_proto: Vec<String>,
-    
+
     /// Exclude by port number
     #[arg(long)]
     exc_port: Vec<u16>,
-    
+
     /// Exclude by IP address
     #[arg(long)]
     exc_ip: Vec<String>,
+
+    /// Remove MAC address
+    #[arg(long)]
+    no_mac: bool,
 }
 use crate::parser::parse_ethernet;
 
@@ -72,6 +78,16 @@ fn main() {
     })
     .expect("ОШИБКА НАСТРОЙКИ CTRL+C");
 
+    let filters = Filters {
+        proto: cli.proto,
+        port: cli.port,
+        ip: cli.ip,
+        exc_proto: cli.exc_proto,
+        exc_port: cli.exc_port,
+        exc_ip: cli.exc_ip,
+        no_mac: cli.no_mac,
+    };
+
     loop {
         let n = unsafe {
             recvfrom(
@@ -91,7 +107,7 @@ fn main() {
 
         let n = n as usize;
 
-        parse_ethernet(&buf[0..n], &cli.proto, &cli.port, &cli.ip, &cli.exc_proto, &cli.exc_port, &cli.exc_ip);
+        parse_ethernet(&buf[0..n], &filters);
 
         if !running.load(Ordering::SeqCst) {
             println!("Завершение работы...");

@@ -1,3 +1,4 @@
+use crate::filters::Filters;
 use colored::Colorize;
 
 fn known_org(ip: &str) -> &str {
@@ -6,9 +7,15 @@ fn known_org(ip: &str) -> &str {
         "[Google]"
     } else if ip.starts_with("192.168.") || ip.starts_with("10.") || ip.starts_with("172.16.") {
         "[Local Network]"
-    } else if ip.starts_with("91.108.") || ip.starts_with("149.154.") || ip.starts_with("185.76.214.") {
+    } else if ip.starts_with("91.108.")
+        || ip.starts_with("149.154.")
+        || ip.starts_with("185.76.214.")
+    {
         "[Telegram]"
-    } else if ip.starts_with("208.65.152") || ip.starts_with("208.117.224") || ip.starts_with("64.15.112.") {
+    } else if ip.starts_with("208.65.152")
+        || ip.starts_with("208.117.224")
+        || ip.starts_with("64.15.112.")
+    {
         "[YouTube]"
     } else {
         ""
@@ -35,15 +42,7 @@ fn format_mac(mac: &[u8]) -> String {
 // fn matches_filter(...)
 // нужно допилить отдельную функцию под фильтры
 
-pub fn parse_ethernet(
-    buf: &[u8],
-    proto_filter: &Vec<String>,
-    port_filter: &Vec<u16>,
-    ip_filter: &Vec<String>,
-    exc_proto_filter: &Vec<String>,
-    exc_port_filter: &Vec<u16>,
-    exc_ip_filter: &Vec<String>
-) {
+pub fn parse_ethernet(buf: &[u8], filters: &Filters) {
     if buf.len() < 14 {
         println!("Invalid Ethernet");
     } else {
@@ -51,21 +50,26 @@ pub fn parse_ethernet(
         let mac_src = &buf[6..=11]; // собираем MAC отпавителя
         // MAC это адрес нашего физического интерфейса
 
-        let str_dst_src = format!(
-            "DST: {} -> SRC: {}",
-            format_mac(mac_dst),
-            format_mac(mac_src)
-        );
+        let str_dst_src = if !filters.no_mac {
+            format!(
+                "DST: {} -> SRC: {} |",
+                format_mac(mac_dst),
+                format_mac(mac_src)
+            )
+        } else {
+            "".to_string()
+        };
 
         let ethertype = u16::from_be_bytes([buf[12], buf[13]]);
         // тип вложенного протокола/распаковка пакета (для обработки интернета и других задач)
 
         let ethertype_name = match ethertype {
-            0x0800 => { // IPv4
+            0x0800 => {
+                // IPv4
                 if buf.len() < 14 + 20 {
                     println!("Invalid IPv4");
                 }
-                
+
                 let ip_header = &buf[14..];
                 let proto_code = ip_header[9];
 
@@ -82,14 +86,18 @@ pub fn parse_ethernet(
                     _ => "OTHER",
                 };
 
-                if !proto_filter.is_empty() && !proto_filter.iter().any(|filter| {
-                    proto_name_plain.to_uppercase().starts_with(&filter.to_uppercase())
-                    // фильтр протокола
-                }) {
+                if !filters.proto.is_empty()
+                    && !filters.proto.iter().any(|filter| {
+                        proto_name_plain
+                            .to_uppercase()
+                            .starts_with(&filter.to_uppercase())
+                        // фильтр протокола
+                    })
+                {
                     return;
                 }
 
-                if exc_proto_filter.iter().any(|exc| {
+                if filters.exc_proto.iter().any(|exc| {
                     proto_name_plain
                         .to_uppercase()
                         .starts_with(&exc.to_uppercase())
@@ -150,7 +158,7 @@ pub fn parse_ethernet(
                             ""
                         };
                         format!("{}:{}", "UDP".blue(), service)
-                    },
+                    }
                     1 => "ICMP".cyan().to_string(),
                     2 => "IGMP".purple().to_string(),
                     _ => "Other IP protocol".black().to_string(),
@@ -158,67 +166,87 @@ pub fn parse_ethernet(
                 };
 
                 let (ipv4_info, src_port, dst_port, src_ip, dst_ip) = parse_ipv4(ip_header);
-                
-                if !ip_filter.is_empty() { // фильтр ip
-                    if !ip_filter.iter().any(|ip| src_ip.contains(ip.as_str()) || dst_ip.contains(ip.as_str())) {
-                        return;
-                    }
-                }
-                
-                if !exc_ip_filter.is_empty() {
-                    if exc_ip_filter.iter().any(|ip| src_ip.contains(ip.as_str()) || dst_ip.contains(ip.as_str())) {
+
+                if !filters.ip.is_empty() {
+                    // фильтр ip
+                    if !filters
+                        .ip
+                        .iter()
+                        .any(|ip| src_ip.contains(ip.as_str()) || dst_ip.contains(ip.as_str()))
+                    {
                         return;
                     }
                 }
 
-                if !port_filter.is_empty() {
-                    // фильтр порта
-                    if !port_filter.iter().any(|port| {
-                        src_port == Some(*port) || dst_port == Some(*port)
-                    }) {
-                        return
+                if !filters.exc_ip.is_empty()
+                    && filters
+                        .exc_ip
+                        .iter()
+                        .any(|ip| src_ip.contains(ip.as_str()) || dst_ip.contains(ip.as_str()))
+                {
+                    {
+                        return;
                     }
                 }
-                
-                if !exc_port_filter.is_empty() {
-                    if exc_port_filter.iter().any(|port| {
-                        src_port == Some(*port) || dst_port == Some(*port)
-                    }) {
-                        return
+
+                if !filters.port.is_empty() {
+                    // фильтр порта
+                    if !filters
+                        .port
+                        .iter()
+                        .any(|port| src_port == Some(*port) || dst_port == Some(*port))
+                    {
+                        return;
+                    }
+                }
+
+                if !filters.exc_port.is_empty() {
+                    if filters
+                        .exc_port
+                        .iter()
+                        .any(|port| src_port == Some(*port) || dst_port == Some(*port))
+                    {
+                        return;
                     }
                 }
 
                 format!("{} | {}", ipv4_info, proto_name)
             }
             0x86DD => {
-                if !proto_filter.is_empty() && !proto_filter.iter().any(|filter| {
-                    "IPv6".starts_with(&filter.to_uppercase())
-                }) {
+                if !filters.proto.is_empty()
+                    && !filters
+                        .proto
+                        .iter()
+                        .any(|filter| "IPv6".starts_with(&filter.to_uppercase()))
+                {
                     return;
                 }
 
-                if exc_proto_filter.iter().any(|filter| {
-                    "IPv6"
-                        .to_uppercase()
-                        .starts_with(&filter.to_uppercase())
-                }) {
+                if filters
+                    .exc_proto
+                    .iter()
+                    .any(|filter| "IPv6".to_uppercase().starts_with(&filter.to_uppercase()))
+                {
                     return;
                 }
 
                 "IPv6".to_string()
             }
             0x0806 => {
-                if !proto_filter.is_empty() && !proto_filter.iter().any(|filter| {
-                    "ARP".starts_with(&filter.to_uppercase())
-                }) {
+                if !filters.proto.is_empty()
+                    && !filters
+                        .proto
+                        .iter()
+                        .any(|filter| "ARP".starts_with(&filter.to_uppercase()))
+                {
                     return;
                 }
-                
-                if exc_proto_filter.iter().any(|filter| {
-                    "ARP"
-                        .to_uppercase()
-                        .starts_with(&filter.to_uppercase())
-                }) {
+
+                if filters
+                    .exc_proto
+                    .iter()
+                    .any(|filter| "ARP".to_uppercase().starts_with(&filter.to_uppercase()))
+                {
                     return;
                 }
 
@@ -228,13 +256,19 @@ pub fn parse_ethernet(
             // базовые вложенные протоколы
         };
 
-        println!("{} | {}", str_dst_src, ethertype_name);
+        println!("{} {}", str_dst_src, ethertype_name);
     }
 }
 
 fn parse_ipv4(buf: &[u8]) -> (String, Option<u16>, Option<u16>, String, String) {
     if buf.len() < 20 {
-        return (String::from("Invalid IPv4"), None, None, "".to_string(), "".to_string());
+        return (
+            String::from("Invalid IPv4"),
+            None,
+            None,
+            "".to_string(),
+            "".to_string(),
+        );
     }
 
     let protocol = buf[9];
@@ -280,7 +314,6 @@ fn parse_ipv4(buf: &[u8]) -> (String, Option<u16>, Option<u16>, String, String) 
         src_port,
         dst_port,
         src_ip,
-        dst_ip
-        // выводим строку и кортеж
+        dst_ip, // выводим строку и кортеж
     )
 }
