@@ -200,15 +200,14 @@ pub fn parse_ethernet(buf: &[u8], filters: &Filters) {
                     }
                 }
 
-                if !filters.exc_port.is_empty() {
-                    if filters
+                if !filters.exc_port.is_empty()
+                    && filters
                         .exc_port
                         .iter()
                         .any(|port| src_port == Some(*port) || dst_port == Some(*port))
                     {
                         return;
                     }
-                }
 
                 format!("{} | {}", ipv4_info, proto_name)
             }

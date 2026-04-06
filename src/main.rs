@@ -61,7 +61,7 @@ fn main() {
         panic!("\nОШИБКА СОКЕТА: {}", Error::last_os_error());
     }
 
-    let if_index = unsafe { if_nametoindex(iface_cstr.as_ptr() as *const i8) };
+    let if_index = unsafe { if_nametoindex(iface_cstr.as_ptr()) };
 
     if if_index == 0 {
         panic!("No interface, error: {}", Error::last_os_error());
